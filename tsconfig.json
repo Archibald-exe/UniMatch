@@ -1,0 +1,342 @@
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import Database from "better-sqlite3";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const db = new Database("unimatch.db");
+
+// Initialize Database
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE,
+    name TEXT,
+    role TEXT,
+    major TEXT,
+    bio TEXT,
+    skills TEXT,
+    mindset TEXT,
+    portfolio TEXT,
+    avatar TEXT,
+    match_count INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    founder_id TEXT,
+    title TEXT,
+    pitch TEXT,
+    stage TEXT,
+    roles_needed TEXT,
+    links TEXT,
+    project_image TEXT,
+    status TEXT DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(founder_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS applications (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    applicant_id TEXT,
+    message TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES projects(id),
+    FOREIGN KEY(applicant_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS chats (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    user1_id TEXT,
+    user2_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES projects(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT,
+    sender_id TEXT,
+    content TEXT,
+    type TEXT DEFAULT 'text',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(chat_id) REFERENCES chats(id)
+  );
+`);
+
+// --- Seed Demo Data ---
+const seedData = () => {
+  console.log("Checking database state...");
+  const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
+  const projectCount = db.prepare("SELECT COUNT(*) as count FROM projects").get() as { count: number };
+
+  if (userCount.count > 0 && projectCount.count > 0) {
+    console.log("Database already contains data. Skipping seed.");
+    return;
+  }
+
+  console.log("Seeding demo data...");
+  
+  // Clear existing to ensure clean state if partially seeded
+  db.prepare("DELETE FROM messages").run();
+  db.prepare("DELETE FROM chats").run();
+  db.prepare("DELETE FROM applications").run();
+  db.prepare("DELETE FROM projects").run();
+  db.prepare("DELETE FROM users").run();
+
+  // Users
+  const users = [
+    { id: 'u1', email: 'alex@tsinghua.edu.cn', name: 'Alex Chen', role: 'Founder', major: 'CS', bio: 'Building the next gen AI for campus logistics. Looking for growth hackers.', skills: JSON.stringify(['Python', 'PyTorch', 'Strategy']), mindset: JSON.stringify({ vision: 90, execution: 70, design: 40, technical: 95, social: 60 }), portfolio: JSON.stringify([{ title: 'CampusBot', link: 'https://github.com/alex/campusbot', description: 'Autonomous delivery bot' }]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 1 },
+    { id: 'u2', email: 'sarah@tsinghua.edu.cn', name: 'Sarah Lin', role: 'Founder', major: 'Design', bio: 'Creating a sustainable fashion marketplace for students. Need a backend wizard.', skills: JSON.stringify(['UI/UX', 'Branding', 'Sustainability']), mindset: JSON.stringify({ vision: 80, execution: 60, design: 95, technical: 30, social: 85 }), portfolio: JSON.stringify([{ title: 'EcoStyle', link: 'https://behance.net/sarah/ecostyle', description: 'Sustainable fashion UI' }]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 0 },
+    { id: 'u3', email: 'mike@tsinghua.edu.cn', name: 'Mike Zhang', role: 'Student', major: 'Business', bio: 'Growth hacker and sales enthusiast. Love early stage startups.', skills: JSON.stringify(['Sales', 'Marketing', 'SQL']), mindset: JSON.stringify({ vision: 60, execution: 90, design: 50, technical: 40, social: 95 }), portfolio: JSON.stringify([]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Mike&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 0 },
+    { id: 'u4', email: 'elena@tsinghua.edu.cn', name: 'Elena Petrova', role: 'Student', major: 'Software', bio: 'Full-stack dev with a passion for clean code.', skills: JSON.stringify(['React', 'Node.js', 'AWS']), mindset: JSON.stringify({ vision: 70, execution: 85, design: 60, technical: 90, social: 50 }), portfolio: JSON.stringify([{ title: 'CleanCode Lib', link: 'https://github.com/elena/cleancode', description: 'Utility library for React' }]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elena&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 1 },
+    { id: 'u5', email: 'david@tsinghua.edu.cn', name: 'David Wu', role: 'Student', major: 'Math', bio: 'Algo enthusiast. I solve problems for fun.', skills: JSON.stringify(['Algorithms', 'C++', 'Rust']), mindset: JSON.stringify({ vision: 50, execution: 75, design: 20, technical: 98, social: 40 }), portfolio: JSON.stringify([]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=David&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 0 },
+    { id: 'u6', email: 'lisa@tsinghua.edu.cn', name: 'Lisa Wong', role: 'Founder', major: 'Arts', bio: 'Building a VR gallery for student artists.', skills: JSON.stringify(['Unity', 'Blender', 'C#']), mindset: JSON.stringify({ vision: 95, execution: 50, design: 90, technical: 70, social: 80 }), portfolio: JSON.stringify([{ title: 'VR Gallery', link: 'https://artstation.com/lisa/vr', description: 'Virtual reality art space' }]), avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Lisa&backgroundColor=ffadad,ffd6a5,fdffb6,caffbf,9bf6ff,a0c4ff,bdb2ff,ffc6ff', match_count: 0 }
+  ];
+
+  const insertUser = db.prepare("INSERT INTO users (id, email, name, role, major, bio, skills, mindset, portfolio, avatar, match_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  users.forEach(u => insertUser.run(u.id, u.email, u.name, u.role, u.major, u.bio, u.skills, u.mindset, u.portfolio, u.avatar, u.match_count));
+
+  // Projects
+  const projects = [
+    { id: 'p1', founder_id: 'u1', title: 'CampusAI', pitch: 'Optimizing university delivery routes using swarm intelligence.', stage: 'MVP', roles_needed: JSON.stringify(['Dev', 'Growth']), links: 'https://github.com/campusai', project_image: 'https://api.dicebear.com/7.x/shapes/svg?seed=CampusAI' },
+    { id: 'p2', founder_id: 'u2', title: 'EcoThread', pitch: 'A peer-to-peer rental platform for university formals.', stage: 'Idea', roles_needed: JSON.stringify(['Backend', 'Marketing']), links: '', project_image: 'https://api.dicebear.com/7.x/shapes/svg?seed=EcoThread' },
+    { id: 'p3', founder_id: 'u6', title: 'V-Gallery', pitch: 'The metaverse for campus artists. Show, sell, and connect.', stage: 'Idea', roles_needed: JSON.stringify(['Unity Dev', 'Community Manager']), links: '', project_image: 'https://api.dicebear.com/7.x/shapes/svg?seed=V-Gallery' }
+  ];
+
+  const insertProject = db.prepare("INSERT INTO projects (id, founder_id, title, pitch, stage, roles_needed, links, project_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  projects.forEach(p => insertProject.run(p.id, p.founder_id, p.title, p.pitch, p.stage, p.roles_needed, p.links, p.project_image));
+
+  // Applications
+  const apps = [
+    { id: 'a1', project_id: 'p1', applicant_id: 'u3', message: 'I can help you scale the user base across the business school.', status: 'pending' },
+    { id: 'a2', project_id: 'p2', applicant_id: 'u4', message: 'I have built similar marketplaces before.', status: 'pending' },
+    { id: 'a3', project_id: 'p3', applicant_id: 'u5', message: 'I can optimize your VR rendering engine.', status: 'pending' },
+    { id: 'a4', project_id: 'p1', applicant_id: 'u5', message: 'The swarm intelligence part sounds like a math problem I want to solve.', status: 'pending' }
+  ];
+
+  const insertApp = db.prepare("INSERT INTO applications (id, project_id, applicant_id, message, status) VALUES (?, ?, ?, ?, ?)");
+  apps.forEach(a => insertApp.run(a.id, a.project_id, a.applicant_id, a.message, a.status));
+
+  // Chats (Matches)
+  const chatId = 'c1';
+  db.prepare("INSERT INTO chats (id, project_id, user1_id, user2_id) VALUES (?, ?, ?, ?)").run(chatId, 'p1', 'u1', 'u4');
+  
+  // Messages
+  const messages = [
+    { id: 'm1', chat_id: chatId, sender_id: 'u1', content: 'Hey Elena, your profile is awesome. Welcome to the team!' },
+    { id: 'm2', chat_id: chatId, sender_id: 'u4', content: 'Thanks Alex! Excited to get started on the route optimization logic.' }
+  ];
+
+  const insertMsg = db.prepare("INSERT INTO messages (id, chat_id, sender_id, content) VALUES (?, ?, ?, ?)");
+  messages.forEach(m => insertMsg.run(m.id, m.chat_id, m.sender_id, m.content));
+
+  console.log("Demo data seeded successfully.");
+};
+
+seedData();
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // --- API Routes ---
+
+  // Auth Simulation (MVP)
+  app.post("/api/auth/login", (req, res) => {
+    const { email } = req.body;
+    if (!email.endsWith(".edu.cn") && !email.endsWith(".edu")) {
+      return res.status(400).json({ error: "Please use your university email." });
+    }
+    
+    let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    if (!user) {
+      const id = Math.random().toString(36).substring(2, 15);
+      db.prepare("INSERT INTO users (id, email) VALUES (?, ?)").run(id, email);
+      user = { id, email };
+    } else {
+      if (typeof user.skills === 'string') {
+        try { user.skills = JSON.parse(user.skills); } catch (e) { user.skills = []; }
+      }
+      if (typeof user.mindset === 'string') {
+        try { user.mindset = JSON.parse(user.mindset); } catch (e) { user.mindset = {}; }
+      }
+      if (typeof user.portfolio === 'string') {
+        try { user.portfolio = JSON.parse(user.portfolio); } catch (e) { user.portfolio = []; }
+      }
+    }
+    res.json(user);
+  });
+
+  app.get("/api/users/:id", (req, res) => {
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id) as any;
+    if (user) {
+      if (typeof user.skills === 'string') {
+        try { user.skills = JSON.parse(user.skills); } catch (e) { user.skills = []; }
+      }
+      if (typeof user.mindset === 'string') {
+        try { user.mindset = JSON.parse(user.mindset); } catch (e) { user.mindset = {}; }
+      }
+      if (typeof user.portfolio === 'string') {
+        try { user.portfolio = JSON.parse(user.portfolio); } catch (e) { user.portfolio = []; }
+      }
+    }
+    res.json(user);
+  });
+
+  app.put("/api/users/:id", (req, res) => {
+    const { name, role, major, bio, skills, mindset, portfolio, avatar } = req.body;
+    db.prepare(`
+      UPDATE users 
+      SET name = ?, role = ?, major = ?, bio = ?, skills = ?, mindset = ?, portfolio = ?, avatar = ?
+      WHERE id = ?
+    `).run(
+      name, 
+      role, 
+      major, 
+      bio, 
+      Array.isArray(skills) ? JSON.stringify(skills) : skills, 
+      typeof mindset === 'object' ? JSON.stringify(mindset) : mindset,
+      Array.isArray(portfolio) ? JSON.stringify(portfolio) : portfolio,
+      avatar, 
+      req.params.id
+    );
+    res.json({ success: true });
+  });
+
+  // Projects
+  app.post("/api/projects", (req, res) => {
+    const { id, founder_id, title, pitch, stage, roles_needed, links } = req.body;
+    const project_image = `https://api.dicebear.com/7.x/shapes/svg?seed=${title}`;
+    db.prepare(`
+      INSERT INTO projects (id, founder_id, title, pitch, stage, roles_needed, links, project_image)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, founder_id, title, pitch, stage, JSON.stringify(roles_needed), links, project_image);
+    res.json({ success: true });
+  });
+
+  app.get("/api/projects", (req, res) => {
+    const projects = db.prepare(`
+      SELECT p.*, u.name as founder_name, u.avatar as founder_avatar 
+      FROM projects p
+      JOIN users u ON p.founder_id = u.id
+      WHERE p.status = 'active'
+      ORDER BY p.created_at DESC
+    `).all() as any[];
+    
+    const parsedProjects = projects.map(p => ({
+      ...p,
+      roles_needed: typeof p.roles_needed === 'string' ? JSON.parse(p.roles_needed) : p.roles_needed
+    }));
+    
+    res.json(parsedProjects);
+  });
+
+  app.get("/api/projects/my/:userId", (req, res) => {
+    const projects = db.prepare("SELECT * FROM projects WHERE founder_id = ?").all(req.params.userId) as any[];
+    const parsedProjects = projects.map(p => ({
+      ...p,
+      roles_needed: typeof p.roles_needed === 'string' ? JSON.parse(p.roles_needed) : p.roles_needed
+    }));
+    res.json(parsedProjects);
+  });
+
+  // Applications
+  app.post("/api/applications", (req, res) => {
+    const { id, project_id, applicant_id, message } = req.body;
+    db.prepare(`
+      INSERT INTO applications (id, project_id, applicant_id, message)
+      VALUES (?, ?, ?, ?)
+    `).run(id, project_id, applicant_id, message);
+    res.json({ success: true });
+  });
+
+  app.get("/api/applications/project/:projectId", (req, res) => {
+    const apps = db.prepare(`
+      SELECT a.*, u.name as applicant_name, u.avatar as applicant_avatar, u.major as applicant_major, u.mindset as applicant_mindset
+      FROM applications a
+      JOIN users u ON a.applicant_id = u.id
+      WHERE a.project_id = ? AND a.status = 'pending'
+    `).all(req.params.projectId);
+    res.json(apps);
+  });
+
+  app.post("/api/applications/:id/decision", (req, res) => {
+    const { status } = req.body; // 'accepted' or 'rejected'
+    const application = db.prepare("SELECT * FROM applications WHERE id = ?").get(req.params.id);
+    
+    db.prepare("UPDATE applications SET status = ? WHERE id = ?").run(status, req.params.id);
+
+    if (status === 'accepted') {
+      const chatId = Math.random().toString(36).substring(2, 15);
+      const project = db.prepare("SELECT founder_id FROM projects WHERE id = ?").get(application.project_id);
+      
+      db.prepare(`
+        INSERT INTO chats (id, project_id, user1_id, user2_id)
+        VALUES (?, ?, ?, ?)
+      `).run(chatId, application.project_id, project.founder_id, application.applicant_id);
+
+      // Update match counts
+      db.prepare("UPDATE users SET match_count = match_count + 1 WHERE id = ?").run(project.founder_id);
+      db.prepare("UPDATE users SET match_count = match_count + 1 WHERE id = ?").run(application.applicant_id);
+    }
+
+    res.json({ success: true });
+  });
+
+  // Chats & Messages
+  app.get("/api/chats/:userId", (req, res) => {
+    const chats = db.prepare(`
+      SELECT c.*, p.title as project_title, 
+             u1.name as user1_name, u1.avatar as user1_avatar,
+             u2.name as user2_name, u2.avatar as user2_avatar
+      FROM chats c
+      JOIN projects p ON c.project_id = p.id
+      JOIN users u1 ON c.user1_id = u1.id
+      JOIN users u2 ON c.user2_id = u2.id
+      WHERE c.user1_id = ? OR c.user2_id = ?
+    `).all(req.params.userId, req.params.userId);
+    res.json(chats);
+  });
+
+  app.get("/api/messages/:chatId", (req, res) => {
+    const messages = db.prepare("SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC").all(req.params.chatId);
+    res.json(messages);
+  });
+
+  app.post("/api/messages", (req, res) => {
+    const { id, chat_id, sender_id, content, type } = req.body;
+    db.prepare(`
+      INSERT INTO messages (id, chat_id, sender_id, content, type)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, chat_id, sender_id, content, type || 'text');
+    res.json({ success: true });
+  });
+
+  // --- Vite Middleware ---
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
